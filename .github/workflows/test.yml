@@ -1,0 +1,18 @@
+name: Legacy Tests (Deprecated)
+# This workflow is deprecated and replaced by build.yml
+# Kept for reference only - it will not run
+
+on:
+  workflow_dispatch:  # Only run manually
+
+jobs:
+  deprecated:
+    name: Deprecated Workflow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notice
+        run: |
+          echo "⚠️  This workflow is deprecated."
+          echo "Please use the 'Build and Publish' workflow instead."
+          echo "See .github/workflows/build.yml"
+

@@ -1,0 +1,224 @@
+name: Build and Publish
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  GO_VERSION: '1.24'
+
+jobs:
+  # Lint and test on multiple platforms
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for buf breaking change detection
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: '25.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install protoc plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Install tools
+        run: make install-tools
+
+      - name: Download dependencies
+        run: make deps
+
+      - name: Format check
+        if: runner.os == 'Linux'
+        run: |
+          make fmt
+          git diff --exit-code || (echo "Code is not formatted. Run 'make fmt'" && exit 1)
+
+      - name: Lint (Linux only)
+        if: runner.os == 'Linux'
+        run: make lint
+
+      - name: Run tests
+        run: make test
+
+      - name: Build plugin
+        run: make build
+
+      - name: Integration tests
+        run: make test-integration
+
+  # Coverage report (Linux only)
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: '25.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install protoc plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Install tools
+        run: make install-tools
+
+      - name: Download dependencies
+        run: make deps
+
+      - name: Run tests with coverage
+        run: make test-coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/coverage.out
+          flags: unittests
+          fail_ci_if_error: false
+
+  # Buf linting and breaking change detection
+  buf:
+    name: Buf Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for breaking change detection
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install buf
+        run: make install-tools
+
+      - name: Buf lint
+        run: make buf-lint
+
+      - name: Buf format check
+        run: |
+          buf format -d --exit-code || (echo "Proto files are not formatted. Run 'make buf-format'" && exit 1)
+
+      - name: Buf breaking change detection
+        if: github.event_name == 'pull_request'
+        run: make buf-breaking
+
+  # Publish to buf.build (only on main branch pushes and tags)
+  publish:
+    name: Publish to buf.build
+    runs-on: ubuntu-latest
+    needs: [test, coverage, buf]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install buf
+        run: make install-tools
+
+      - name: Buf lint before push
+        run: make buf-lint
+
+      - name: Login to buf.build
+        continue-on-error: true
+        run: echo "${{ secrets.BUF_TOKEN }}" | buf registry login --username ${{ secrets.BUF_USERNAME }} --token-stdin
+
+      - name: Push to buf.build (untagged)
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: make buf-push
+
+      - name: Extract tag version
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Push to buf.build (with tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
+        run: make buf-push-tag TAG=${{ steps.get_version.outputs.VERSION }}
+
+  # Build release artifacts (only on tags)
+  release:
+    name: Build Release Artifacts
+    runs-on: ubuntu-latest
+    needs: [test, coverage, buf]
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Extract tag version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          BINARY_NAME=protoc-gen-redact-${{ steps.get_version.outputs.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          mkdir -p dist
+          go build -ldflags "-s -w -X main.version=${{ steps.get_version.outputs.VERSION }}" -o dist/${BINARY_NAME} .
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: protoc-gen-redact-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          retention-days: 5
