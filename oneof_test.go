@@ -538,6 +538,30 @@ func TestOneofEdgeCases(t *testing.T) {
 			}
 		}
 		assert.Equal(t, 0, redactedCount, "No fields should be redacted")
+		assert.False(t, oneof.HasRedactableFields(), "Oneof with no redacted fields should return false")
+	})
+
+	t.Run("oneof_has_redactable_fields_helper", func(t *testing.T) {
+		oneofWithRedact := &OneofData{
+			Name: "Credential",
+			Fields: []*OneofFieldData{
+				{
+					FieldData:       &FieldData{Name: "Password", Redact: true, RedactionValue: "``"},
+					WrapperTypeName: "Msg_Password",
+				},
+				{
+					FieldData:       &FieldData{Name: "Username", Redact: false},
+					WrapperTypeName: "Msg_Username",
+				},
+			},
+		}
+		assert.True(t, oneofWithRedact.HasRedactableFields(), "Oneof with at least one redacted field should return true")
+
+		emptyOneof := &OneofData{
+			Name:   "Empty",
+			Fields: []*OneofFieldData{},
+		}
+		assert.False(t, emptyOneof.HasRedactableFields(), "Empty oneof should return false")
 	})
 
 	t.Run("oneof_with_all_field_types", func(t *testing.T) {

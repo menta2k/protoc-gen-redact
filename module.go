@@ -325,6 +325,7 @@ var (
 				{{- end }}
 			{{- end }}
 			{{- range $oneof := $msg.Oneofs }}
+				{{- if $oneof.HasRedactableFields }}
 				// Redacting oneof: {{ $oneof.Name }}
 				switch v := x.{{ $oneof.Name }}.(type) {
 				{{- range $field := $oneof.Fields }}
@@ -344,6 +345,7 @@ var (
 					{{- end }}
 				{{- end }}
 				}
+				{{- end }}
 			{{- end }}
 		{{- end }}
     return x.String()

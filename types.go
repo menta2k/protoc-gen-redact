@@ -49,6 +49,16 @@ type OneofData struct {
 	Fields []*OneofFieldData // Fields within this oneof
 }
 
+// HasRedactableFields returns true if at least one field in the oneof has redaction enabled
+func (o *OneofData) HasRedactableFields() bool {
+	for _, f := range o.Fields {
+		if f.Redact {
+			return true
+		}
+	}
+	return false
+}
+
 // OneofFieldData wraps FieldData with oneof-specific information
 type OneofFieldData struct {
 	*FieldData
