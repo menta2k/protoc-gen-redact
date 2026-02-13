@@ -900,6 +900,58 @@ func TestOneofTemplateExecution(t *testing.T) {
 		assert.NotContains(t, output, "case *Msg_PublicId:", "Should NOT have case for non-redacted PublicId")
 	})
 
+	t.Run("oneof_with_no_redacted_fields_skips_switch", func(t *testing.T) {
+		data := &ProtoFileData{
+			Source:  "test.proto",
+			Package: "testpkg",
+			Imports: map[string]string{
+				"redact": "github.com/menta2k/protoc-gen-redact/v3/redact/v3",
+			},
+			Messages: []*MessageData{
+				{
+					Name:      "Msg",
+					WithAlias: "Msg",
+					Oneofs: []*OneofData{
+						{
+							Name: "PublicChoice",
+							Fields: []*OneofFieldData{
+								{
+									FieldData: &FieldData{
+										Name:        "DisplayName",
+										Redact:      false,
+										FieldGoType: "string",
+									},
+									WrapperTypeName: "Msg_DisplayName",
+								},
+								{
+									FieldData: &FieldData{
+										Name:        "Nickname",
+										Redact:      false,
+										FieldGoType: "string",
+									},
+									WrapperTypeName: "Msg_Nickname",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		var buf bytes.Buffer
+		err := tpl.Execute(&buf, data)
+		require.NoError(t, err, "Template execution should succeed")
+
+		output := buf.String()
+
+		// No type switch should be generated for oneofs with no redacted fields,
+		// otherwise it would produce: switch v := x.PublicChoice.(type) {}
+		// which causes "v declared and not used" compilation error.
+		assert.NotContains(t, output, "switch v := x.PublicChoice.(type)", "Should NOT generate type switch for oneof with no redacted fields")
+		assert.NotContains(t, output, "Msg_DisplayName", "Should NOT reference wrapper types for non-redacted oneof")
+		assert.NotContains(t, output, "Msg_Nickname", "Should NOT reference wrapper types for non-redacted oneof")
+	})
+
 	t.Run("message_skip_in_oneof", func(t *testing.T) {
 		data := &ProtoFileData{
 			Source:  "test.proto",

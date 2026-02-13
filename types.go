@@ -45,7 +45,7 @@ type MessageData struct {
 
 // OneofData defines custom data type for a protobuf oneof group
 type OneofData struct {
-	Name   string           // Go name of the oneof field in the parent struct
+	Name   string            // Go name of the oneof field in the parent struct
 	Fields []*OneofFieldData // Fields within this oneof
 }
 
