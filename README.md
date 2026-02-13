@@ -20,6 +20,7 @@ This project is a derivative work based on the original [protoc-gen-redact](http
 This fork includes enhancements and modifications including:
 - Comprehensive error handling and validation
 - Extensive test suite (374+ tests)
+- Oneof field support with type-safe switch statement generation
 - Support for proto3 optional fields with correct pointer semantics
 - Custom template file support for code generation
 - Integration tests with actual protoc compilation
@@ -27,51 +28,198 @@ This fork includes enhancements and modifications including:
 
 All modifications are licensed under the Apache License 2.0, consistent with the original project.
 
-Developers only need import the PGR extension and annotate the messages or fields in their proto files to redact:
+Developers only need to import the PGR extension and annotate the messages or fields in their proto files to redact:
 
 ```protobuf
 syntax = "proto3";
 
 package user;
 
-import "redact/redact.proto";
+import "redact/v3/redact.proto";
 import "google/protobuf/empty.proto";
 
-option go_package = "github.com/arrakis-digital/protoc-gen-redact/v3/examples/user/pb;user";
+option go_package = "github.com/menta2k/protoc-gen-redact/v3/examples/user/pb;user";
 
 message User {
-    // User credentials
     string username = 1;
-    string password = 2 [(redact.redact) = true]; // default redaction
-
-    // User information
-    string email = 3 [(redact.custom).string = "r*d@ct*d"];
+    string password = 2 [(redact.v3.value).string = "REDACTED"];
+    string email = 3 [(redact.v3.value).string = "r*d@ct*d"];
     string name = 4;
-    Location home = 5;
+    Location home = 5 [(redact.v3.value).message.apply = true];
+
     message Location {
-        double lat = 1;
-        double lng = 2;
+        double lat = 1 [(redact.v3.value).double = 0.0];
+        double lng = 2 [(redact.v3.value).double = 0.0];
     }
 }
 
 service Chat {
     rpc GetUser(GetUserRequest) returns (User);
     rpc GetUserInternal(GetUserRequest) returns (User) {
-        option (redact.method_skip) = true;
+        option (redact.v3.method_skip) = true;
     }
     rpc ListUsers (google.protobuf.Empty) returns (ListUsersResponse) {
-        option (redact.internal_method) = true;
+        option (redact.v3.internal_method) = true;
     }
 }
+```
 
-message GetUserRequest {
-    string username = 1;
+## Field-Level Redaction
+
+### Scalar Fields
+
+Annotate individual fields with custom redaction values:
+
+```protobuf
+string password = 1 [(redact.v3.value).string = "REDACTED"];
+int32 age = 2 [(redact.v3.value).int32 = 0];
+bool is_active = 3 [(redact.v3.value).bool = false];
+bytes signature = 4 [(redact.v3.value).bytes = ""];
+double score = 5 [(redact.v3.value).double = 0.0];
+```
+
+All proto scalar types are supported: `float`, `double`, `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64`, `fixed32`, `fixed64`, `sfixed32`, `sfixed64`, `bool`, `string`, `bytes`, and `enum`.
+
+### Message Fields
+
+Control redaction of nested messages:
+
+```protobuf
+// Recursively apply redaction rules to nested message fields
+Profile profile = 1 [(redact.v3.value).message.apply = true];
+
+// Set the entire message to nil
+Settings settings = 2 [(redact.v3.value).message.nil = true];
+
+// Replace with an empty instance
+Metadata metadata = 3 [(redact.v3.value).message.empty = true];
+
+// Skip redaction entirely for this field
+AuditLog log = 4 [(redact.v3.value).message.skip = true];
+```
+
+### Repeated and Map Fields
+
+```protobuf
+// Clear the collection to empty
+map<string, string> attributes = 1 [(redact.v3.value).element.empty = true];
+
+// Apply default redaction to each element
+repeated Address addresses = 2 [(redact.v3.value).element.nested = true];
+
+// Apply custom redaction to each item
+repeated int32 scores = 3 [(redact.v3.value).element.item.int32 = 0];
+```
+
+## Proto3 Optional Fields
+
+Proto3 `optional` fields use pointer semantics in Go. The generator handles this correctly by creating temporary variables and assigning pointers:
+
+```protobuf
+message User {
+    optional string email = 1 [(redact.v3.value).string = "r*d@ct*d"];
+    optional int32 age = 2 [(redact.v3.value).int32 = 0];
+    optional bool is_active = 3 [(redact.v3.value).bool = false];
+    optional bytes signature = 4 [(redact.v3.value).bytes = ""];
+    optional Profile profile = 5 [(redact.v3.value).message.nil = true];
+}
+```
+
+Generated code correctly uses pointer assignment:
+```go
+tmp := "r*d@ct*d"
+x.Email = &tmp
+```
+
+## Oneof Fields
+
+The generator supports `oneof` groups with type-safe switch statements. Each oneof variant is matched by its Go wrapper type, and only fields with redaction annotations generate case branches:
+
+```protobuf
+message OneofMessage {
+    string id = 1;
+
+    // All fields redacted
+    oneof contact {
+        string email = 2 [(redact.v3.value).string = "r*d@ct*d"];
+        string phone = 3 [(redact.v3.value).string = "XXX-XXX-XXXX"];
+        int32 phone_code = 4 [(redact.v3.value).int32 = 0];
+    }
+
+    // Message fields in oneofs
+    oneof payload {
+        Profile user_profile = 5 [(redact.v3.value).message.apply = true];
+        Settings user_settings = 6 [(redact.v3.value).message.nil = true];
+        string raw_data = 7 [(redact.v3.value).string = "REDACTED"];
+    }
+
+    // Mixed: some fields redacted, some not
+    oneof identifier {
+        string username = 8 [(redact.v3.value).string = "REDACTED"];
+        string public_id = 9;  // not redacted
+        int64 internal_id = 10 [(redact.v3.value).int64 = 0];
+    }
+}
+```
+
+Generated code for a oneof group:
+```go
+// Redacting oneof: Contact
+switch v := x.Contact.(type) {
+case *OneofMessage_Email:
+    v.Email = "r*d@ct*d"
+case *OneofMessage_Phone:
+    v.Phone = "XXX-XXX-XXXX"
+case *OneofMessage_PhoneCode:
+    v.PhoneCode = 0
+}
+```
+
+If a oneof group has no redacted fields, the switch statement is omitted entirely to avoid compilation errors.
+
+## Message-Level Options
+
+Control redaction behavior for entire messages:
+
+```protobuf
+// Skip all redaction for this message
+message PublicData {
+    option (redact.v3.ignored) = true;
+    string data = 1;
 }
 
-message ListUsersResponse {
-    repeated User users = 1;
+// Always set to nil
+message SensitiveData {
+    option (redact.v3.nil) = true;
+    string secret = 1;
 }
 
+// Always replace with empty instance
+message EmptyData {
+    option (redact.v3.empty) = true;
+    string field1 = 1;
+}
+```
+
+## Service and Method Options
+
+Control redaction at the service and method level:
+
+```protobuf
+service MyService {
+    // Normal RPC with response redaction
+    rpc GetUser(GetUserRequest) returns (User);
+
+    // Skip redaction for this method
+    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse) {
+        option (redact.v3.method_skip) = true;
+    }
+
+    // Mark method as internal (returns PermissionDenied)
+    rpc AdminOperation(AdminRequest) returns (AdminResponse) {
+        option (redact.v3.internal_method) = true;
+    }
+}
 ```
 
 ## Advanced Features
