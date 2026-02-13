@@ -231,7 +231,28 @@ func (m *Module) processMessage(
 
 	if len(wantFields) > 0 {
 		for _, field := range msg.Fields() {
+			// Skip fields that belong to non-synthetic oneofs;
+			// they are processed as part of OneofData below
+			if field.InOneOf() && !field.OneOf().IsSynthetic() {
+				continue
+			}
 			msgData.Fields = append(msgData.Fields, m.processFields(field, nameWithAlias))
+		}
+
+		// Process non-synthetic oneofs (real oneof groups)
+		for _, oneOf := range msg.RealOneOfs() {
+			oneofData := &OneofData{
+				Name:   m.ctx.Name(oneOf).String(),
+				Fields: make([]*OneofFieldData, 0, len(oneOf.Fields())),
+			}
+			for _, field := range oneOf.Fields() {
+				fieldData := m.processFields(field, nameWithAlias)
+				oneofData.Fields = append(oneofData.Fields, &OneofFieldData{
+					FieldData:       fieldData,
+					WrapperTypeName: msgData.Name + "_" + fieldData.Name,
+				})
+			}
+			msgData.Oneofs = append(msgData.Oneofs, oneofData)
 		}
 	}
 	return msgData

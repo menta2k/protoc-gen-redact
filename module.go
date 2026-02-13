@@ -324,6 +324,27 @@ var (
 					// Safe field: {{ $field.Name }}
 				{{- end }}
 			{{- end }}
+			{{- range $oneof := $msg.Oneofs }}
+				// Redacting oneof: {{ $oneof.Name }}
+				switch v := x.{{ $oneof.Name }}.(type) {
+				{{- range $field := $oneof.Fields }}
+					{{- if $field.Redact }}
+					case *{{ $field.WrapperTypeName }}:
+						{{- if $field.IsMessage }}
+							{{- if $field.NestedEmbedCall }}
+								redact.Apply(v.{{ $field.Name }})
+							{{- else if $field.EmbedSkip }}
+								// {{ $field.Name }} redaction is skipped
+							{{- else }}
+								v.{{ $field.Name }} = {{ $field.RedactionValue }}
+							{{- end }}
+						{{- else }}
+							v.{{ $field.Name }} = {{ $field.RedactionValue }}
+						{{- end }}
+					{{- end }}
+				{{- end }}
+				}
+			{{- end }}
 		{{- end }}
     return x.String()
 	}

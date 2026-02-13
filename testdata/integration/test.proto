@@ -135,3 +135,29 @@ message ComplexMessage {
   optional Profile optional_profile = 4 [(redact.v3.value).message.nil = true];
   optional Settings optional_settings = 5 [(redact.v3.value).message.empty = true];
 }
+
+// OneofMessage demonstrates oneof field redaction
+message OneofMessage {
+  string id = 1;
+
+  // Oneof with scalar fields that need redaction
+  oneof contact {
+    string email = 2 [(redact.v3.value).string = "r*d@ct*d"];
+    string phone = 3 [(redact.v3.value).string = "XXX-XXX-XXXX"];
+    int32 phone_code = 4 [(redact.v3.value).int32 = 0];
+  }
+
+  // Oneof with a message field
+  oneof payload {
+    Profile user_profile = 5 [(redact.v3.value).message.apply = true];
+    Settings user_settings = 6 [(redact.v3.value).message.nil = true];
+    string raw_data = 7 [(redact.v3.value).string = "REDACTED"];
+  }
+
+  // Oneof with mixed redacted and non-redacted fields
+  oneof identifier {
+    string username = 8 [(redact.v3.value).string = "REDACTED"];
+    string public_id = 9;
+    int64 internal_id = 10 [(redact.v3.value).int64 = 0];
+  }
+}

@@ -37,9 +37,22 @@ type MessageData struct {
 	WithAlias string
 
 	Fields  []*FieldData
+	Oneofs  []*OneofData
 	Ignore  bool
 	ToNil   bool
 	ToEmpty bool
+}
+
+// OneofData defines custom data type for a protobuf oneof group
+type OneofData struct {
+	Name   string           // Go name of the oneof field in the parent struct
+	Fields []*OneofFieldData // Fields within this oneof
+}
+
+// OneofFieldData wraps FieldData with oneof-specific information
+type OneofFieldData struct {
+	*FieldData
+	WrapperTypeName string // Go wrapper type name (e.g., "MessageName_FieldName")
 }
 
 // FieldData defines custom data type for Field info needed in template
